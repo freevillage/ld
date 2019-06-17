@@ -1,0 +1,41 @@
+fTrue = linspace( 0.3, 0.3, 1 );
+Nf = length( fTrue );
+Nantennas = 7;
+sigmaNoise = logspace( -10, -1, 10 );
+Nsigma = length( sigmaNoise );
+Nsamples = 1000;
+
+estimatedFreqs = nan( Nf, Nsigma, Nsamples );
+
+samplesProgressBar = waitbar( 0, 'Processing samples...' );
+
+for i = 1 : Nf
+    for j = 1 : Nsigma
+        estimatedFreqs(i,j,:) = MusicEstimatedFrequencySamples( Nantennas, Nsamples, fTrue(i), sigmaNoise(j) );
+        waitbar( (i-1)*Nsigma+j, samplesProgressBar );
+    end
+end
+
+delete( samplesProgressBar );
+
+muFreqs    = mean( estimatedFreqs, 3 );
+sigmaFreqs = std( estimatedFreqs, 0, 3 );
+
+%%
+
+Nplots = Nf * Nsigma;
+
+figure
+
+for i = 1 : Nf
+    for j = 1 : Nsigma
+    kPlot = (i-1)*Nsigma + j;
+    subplot( Nf, Nsigma, kPlot )
+    hold on
+    theseFreqs = estimatedFreqs(i,j,:);
+    minFreq = min( theseFreqs );
+    maxFreq = max( theseFreqs );
+    histogram( squeeze( estimatedFreqs(i,j,:) ), 'Normalization', 'pdf' );
+    plot( linspace( minFreq, maxFreq, 1000 ), normpdf( 
+    end
+end

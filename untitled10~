@@ -1,0 +1,34 @@
+%% DOA problem using a 2D array at a fixed location
+%
+% Set up a problem with a single source and a stationary array.
+totalArrayElements = [20 20];
+sourceFrequency = 300e6;
+sourcePosition = [ 0 ; 0 ; 0 ];
+c = physconst('LightSpeed');
+wavelength = c / sourceFrequency;
+elementSpacing = wavelength/2 * [1 1];
+GetArrayPosition = @(t) [ -400; 0; 300 ];
+GetSourcePosition = @(t) sourcePosition;
+GetRotation = @(t) eye(3);
+%sigmaNoise = 1e1;
+
+%%
+
+sigmaNoise = 10.^(-13:0);
+totalSigmas = length( sigmaNoise );
+
+locationsL2 = nan( 3, totalSigmas );
+
+for iSigma = 1 : totalSigmas
+    args = { ...
+        'SigmaNoise', sigmaNoise(iSigma), ...
+        'FastTimeEnd', 1e-6, ...
+        'SourcePositionFcn', GetSourcePosition, ...
+        'SourceFrequency', sourceFrequency, ...
+        'ElementSpacing', elementSpacing, ...
+        'TotalElements', totalArrayElements, ...
+        'ArrayPositionFcn', GetArrayPosition ...
+        };
+    resultsL2 = CacheResults( @GetSourceLocation, args  );
+    locationsL2(:,iSigma) = resultsL2.sourceLocation(:);
+end

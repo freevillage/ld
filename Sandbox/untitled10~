@@ -1,0 +1,5 @@
+function aToPowers = SuccessivePowers( a, powerMax )
+
+cumprod( [
+
+end

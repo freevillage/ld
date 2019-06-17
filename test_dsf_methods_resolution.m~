@@ -1,0 +1,97 @@
+% This script tests different methods of DSF inversion by generating many
+% samples of a signal with the same statistical (noise) properties, and
+% performing frequency inversion on each sample trajectory using different
+% available methods.
+%
+% By looking at the mean and std of the reconstructed frequency, one can
+% assess the performance of each method
+
+N = 501;
+n = (0:N-1)';
+theta_k = [ 0.4 0.2 0.8 ]';  % angles in rad
+theta_k = [ 0.2 ];
+z_k = exp(-1i*pi*theta_k);
+c_k = [ 1 0.3 -0.2 ]';
+c_k = [ 1 ];
+K = length(z_k);     % how many components in the signal
+A = kron(ones(N,1), z_k').^kron(n, ones(1,K));
+x_n = A*c_k;
+
+%% Add noise if necessary
+
+sigma_n = logspace( -5, 1, 7 );
+totalSigmans = length( sigma_n );
+% y_n = x_n + sigma_n*exp(2*pi*1i*rand(size(x_n)));
+% u_n = y_n;      % observation
+
+
+%% Show true phases
+truePhases = ToRow( sort( WrapToOne( theta_k ) ) );
+fprintf( '\n\n%25s: %s\n\n', ...
+    'True', ...
+    num2str( truePhases, '%+10f' ) );
+
+%% Calculate and show estimated phases
+supportedMethods = { ...
+    'Prony', ...
+    'TotalLeastSquaresProny', ...
+    'CorrelationSinglePhase', ...
+...%    'RootMusic', ...
+    'MatrixPencil', ...
+... %    'Music', ...
+... %    'Esprit' ...
+    'MaximumLikelihoodSinglePhase'
+    };
+
+supportedMethods = supportedMethods( [3 end] );
+
+totalMethods = length( supportedMethods );
+totalSamples = 100;
+estimatedPhases = nan( totalSamples, totalMethods, totalSigmans );
+
+progressBarSnr = waitbar( 0, 'Processing \sigma_n ...' );
+
+for kSigman = 1 : totalSigmans
+    parfor jSample = 1 : totalSamples
+        %y_n = x_n + sigma_n(kSigman) *exp(2*pi*1i*rand(size(x_n)));
+        y_n = x_n + sigma_n(kSigman) * ( randn(size(x_n)) + 1i * randn(size(x_n)) ); 
+        u_n = y_n;      % observation
+        for iMethod = 1 : totalMethods
+            methodName = supportedMethods{iMethod};
+            estimatedPhases(jSample,iMethod,kSigman) = ToRow( sort( DiscreteFrequencySpectrum( u_n, ...
+                'TotalFrequencies', K, ...
+                'Method', methodName, ...,
+                'TotalRefinements', 1, ...
+                'NoiseStandardDeviation', sigma_n(kSigman) ) ) );
+        end
+    end
+    waitbar( kSigman/totalSigmans, progressBarSnr );
+end
+
+delete( progressBarSnr )
+
+%%
+figure
+subplot( 1, 2, 1 )
+meanEstimatedPhases = squeeze( mean( estimatedPhases ) );
+plotMeans = semilogx( sigma_n, meanEstimatedPhases, 'LineWidth', 1 );
+plotMeans(totalMethods).LineWidth = 3;
+xlabel( '\sigma_n' )
+ylabel( 'mean(\theta)' )
+xlim( minmax( sigma_n ) ) 
+legend( supportedMethods{:}, 'Location', 'SouthEast' )
+title( 'Estimate''s mean' )
+grid on
+
+subplot( 1, 2, 2 )
+stdEstimatedPhases = squeeze( std( estimatedPhases ) );
+plotStds = loglog( sigma_n, stdEstimatedPhases, 'LineWidth', 1 );
+plotStds(totalMethods).LineWidth = 3;
+xlabel( '\sigma_n' )
+ylabel( 'std(\theta)' )
+xlim( minmax( sigma_n ) ) 
+legend( supportedMethods{:}, 'Location', 'SouthEast' )
+title( 'Estimate''s std' )
+grid on
+
+suptitle( sprintf( 'Phase estimation (true=%.1f)', theta_k ) )

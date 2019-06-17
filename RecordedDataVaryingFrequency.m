@@ -1,0 +1,43 @@
+function recordings = RecordedDataVaryingFrequency( time, distance, sourceAmplitude, sourceFreq, sourcePhase, sourceFreqStd )
+
+assert( isvector( time ) );
+time = ToRow( time );
+
+totalSourceComponents = length( sourceAmplitude );
+totalTimes = length( time );
+totalDistances = length( distance );
+c = LightSpeed;
+
+if( totalTimes > 1 && totalDistances == 1 )
+    distance = distance * ones( size( time ) );
+else
+    distance = ToRow( distance );
+end
+
+sourceAmplitude = ToColumn( sourceAmplitude );
+sourceFreq = ToColumn( sourceFreq );
+sourcePhase = ToColumn( sourcePhase );
+
+if nargin < 6
+    sourceFreqStd = zeros( totalSourceComponents, 1 );
+end
+
+FrequencyFcn = @(t) 
+amplitudes = sourceAmplitude * ones( 1, totalTimes );
+
+frequencyMeans = sourceFreq * ones( 1, totalTimes );
+frequencyPerturbations = sourceFreqStd .* randn( totalSourceComponents, totalTimes );
+frequencies = frequencyMeans + frequencyPerturbations;
+
+distances = ones( totalSourceComponents, 1 ) * distance;
+times = ones( totalSourceComponents, 1 ) * time;
+phases = sourcePhase * ones( 1, totalTimes );
+
+geometricSpreading = 1 ./ ( 4*pi*distances );
+
+recordings = geometricSpreading .* amplitudes .* exp( 1i/c * ( -2*pi * frequencies .* (distances - c*times) + c * phases ) );
+if totalSourceComponents > 1
+    recordings = sum( recordings );
+end
+
+end

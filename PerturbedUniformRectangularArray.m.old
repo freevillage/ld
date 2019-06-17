@@ -1,0 +1,58 @@
+function posReceiver = PerturbedUniformRectangularArray( arrayDimensions, totalReceivers, arrayPosition, arrayAngles, ...
+    iPerturbed, jPerturbed, xFractionPerturbed, yFractionPerturbed )
+
+assert( nargin == 4 || nargin == 8 );
+if nargin == 4
+    totalPerturbations = 0;
+else
+    totalPerturbations = numel( iPerturbed );
+    assert( numel( iPerturbed ) == numel( jPerturbed ) ...
+        && numel( iPerturbed ) == numel( xFractionPerturbed ) ...
+        && numel( iPerturbed ) == numel( yFractionPerturbed ) );
+end
+
+assert( isvector( arrayDimensions ) && all( arrayDimensions > 0 ) && length( arrayDimensions ) == 2 );
+lx = arrayDimensions(1);
+ly = arrayDimensions(2);
+
+assert( isvector( totalReceivers ) && all( totalReceivers > 0 ) && length( totalReceivers ) == 2 );
+totalReceivers = round( totalReceivers );
+Nx = totalReceivers(1);
+Ny = totalReceivers(2);
+
+assert( isvector( arrayPosition ) && isreal( arrayPosition ) && length( arrayPosition ) == 3 );
+
+assert( isvector( arrayAngles ) && isreal( arrayAngles ) && length( arrayAngles ) == 3 );
+alpha = arrayAngles(1);
+beta = arrayAngles(2);
+gamma = arrayAngles(3);
+
+dx = lx / (Nx-1);
+dy = ly / (Ny-1);
+
+xi = dx * ( 0 : Nx-1 ) - lx/2;
+yj = dy * ( 0 : Ny-1 ) - ly/2;
+
+[X, Y, Z] = ndgrid( xi, yj, 0 );
+
+for kPerturbation = 1 : totalPerturbations
+    ip = iPerturbed(kPerturbation);
+    jp = jPerturbed(kPerturbation);
+    dxp = xFractionPerturbed(kPerturbation) * dx;
+    dyp = yFractionPerturbed(kPerturbation) * dy;
+    
+    if ip >= 1 && ip <= Nx && jp >= 1 && jp <= Ny
+        X(ip,jp) = X(ip,jp) + dxp;
+        Y(ip,jp) = Y(ip,jp) + dyp;
+    end
+end
+
+xyzRot = RotationMatrix( alpha, beta, gamma ) * [ ToRow( X ); ToRow( Y ); ToRow( Z ) ];
+
+Xtranslated = xyzRot(1, :) + arrayPosition(1);
+Ytranslated = xyzRot(2, :) + arrayPosition(2);
+Ztranslated = xyzRot(3, :) + arrayPosition(3);
+
+posReceiver = reshape( [Xtranslated ; Ytranslated ; Ztranslated], [3 Nx Ny] );
+
+end

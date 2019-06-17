@@ -1,0 +1,24 @@
+function DeconvolvedTrace = DeconvolveRicker1D( InputTrace, CentralFrequency, Stabilization )
+
+assert( ndims( InputTrace ) == 1, ...
+    'Dataset:DeconvolveRicker1D:WrongDim', ...
+    'The input trace must be a 1D dataset' );
+
+% Deconvolution is performed in the Fourier domain. So we convert the input
+% trace to Fourier
+InputTraceFourier = FourierTransform1D( InputTrace );
+
+% The input wavelet is Ricker with a given central frequency
+NormalizedFrequencies = InputTraceFourier.Axes.Locations / CentralFrequency;
+SourceFourier = Dataset( InputTraceFourier.Axes, ...
+                         ( ( 2/sqrt(pi) ) * ( NormalizedFrequencies .^ 2 ) .* exp( - NormalizedFrequencies .^ 2 ) ) .^ 2 );
+
+% Deconvolution with numerical stabilization to prevent the numerical
+% vision from blowing up
+DeconvolvedTraceFourier = ( InputTraceFourier .* conj( SourceFourier ) ) ./ ( SourceFourier .* conj( SourceFourier ) + Stabilization );
+
+%DeconvolvedTraceFourier = InputTraceFourier ./ ( SourceFourier + Stabilization );
+
+DeconvolvedTrace = InverseFourierTransform1D( DeconvolvedTraceFourier );
+
+end % of DeconvolveTrace

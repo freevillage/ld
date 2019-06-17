@@ -1,0 +1,66 @@
+function ReflectionTime = LineReflectionTime( Velocity, SourceX, SourceZ, ReceiverX, ReceiverZ, ReflectorBaseX, ReflectorBaseZ, DippingAngle )
+
+%% Relabel the variables
+
+xl = ReflectorBaseX;
+cg = ReflectorBaseZ;
+theta = -DippingAngle;
+
+TotalSources = length( SourceX );
+TotalReceivers = length( ReceiverX );
+ReflectionTime = zeros( TotalSources, TotalReceivers );
+
+for SourceNumber = 1 : TotalSources
+    for ReceiverNumber = 1 : TotalReceivers
+        xs = SourceX( SourceNumber );
+        zs = SourceZ( SourceNumber );
+        xr = ReceiverX( ReceiverNumber );
+        cg1 = ReceiverZ( ReceiverNumber );
+        
+        if ArePointsOnSameSide( xs, zs, xr, cg1, xl, cg, theta )
+            ReflectionTime( SourceNumber, ReceiverNumber ) = MapleGeneratedReflectionTime( Velocity, xs, zs, xr, cg1, xl, cg, theta );
+        else
+            ReflectionTime( SourceNumber, ReceiverNumber ) = NaN;
+        end
+    end
+end
+
+end
+
+function flag = ArePointsOnSameSide( xs, zs, xr, zr, xl, zl, theta )
+
+A = -sin( theta );
+B = cos( theta );
+C = - A * xl - zl * B;
+
+flag = ( sign( A * xs + B * zs + C ) == sign( A * xr + B * zr * C ) );
+
+end
+
+% Reflection time enerated by Maple
+function ReflectionTime = MapleGeneratedReflectionTime( Velocity, xs, zs, xr, cg1, xl, cg, theta )
+t1 = cos(theta);
+t2 = xr - xl;
+t3 = t2 * t1;
+t4 = sin(theta);
+t5 = cg1 - cg;
+t6 = t5 * t4;
+t7 = t2 * t4;
+t8 = t5 * t1;
+t10 = xs - xl;
+t12 = zs - cg;
+t21 = t3 + t6 + 0.1e1 / (-t10 * t4 + t12 * t1 - t7 + t8) * (t10 * t1 + t12 * t4 - t3 - t6) * (-t7 + t8);
+t22 = t21 * t1;
+t24 = (xs - xl - t22) ^ 2;
+t25 = t21 * t4;
+t27 = (zs - cg - t25) ^ 2;
+t29 = sqrt(t24 + t27);
+t31 = (xr - xl - t22) ^ 2;
+t33 = (cg1 - cg - t25) ^ 2;
+t35 = sqrt(t31 + t33);
+t36 = t29 + t35;
+
+%% Time = distance / velocity
+ReflectionTime = t36 / Velocity;
+
+end

@@ -1,0 +1,21 @@
+function SetDefaultFontSize( FontSize, LineWidth )
+
+DefaultFontSize  = 20;
+DefaultLineWidth = 2;
+
+
+if( nargin < 2 )
+    LineWidth = DefaultLineWidth;
+    if( nargin < 1 )
+        FontSize = DefaultFontSize;
+    end
+end
+
+% Set font size to a specified number
+set( 0, 'defaultaxesfontsize', FontSize );
+set( 0, 'defaulttextfontsize', FontSize );
+
+set( 0, 'defaultaxeslinewidth', LineWidth );
+set( 0, 'defaultlinelinewidth', LineWidth );
+
+end

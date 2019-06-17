@@ -1,0 +1,18 @@
+function posteriorStats = PosteriorF( observedData, fTrue, sigmaNoise )
+
+MeanLikelihood = @(f0) [ real( CleanSignal(f0) ), imag( CleanSignal(f0) ) ];
+CovLikelihood = @(sigma) sigma * eye( 2*Nantennas );
+
+LikelihoodUnnormalized = @(f) mvnpdf( observedData, MeanLikelihood(f), CovLikelihood(sigmaNoise) );
+
+normalization = integral( LikelihoodUnnormalized,  fTrue - sigmaNoise/10, fTrue + sigmaNoise/10 );
+
+FreqLikelihood = @(f) LikelihoodUnnormalized(f) / normalization;
+
+muF = integral( @(f) f * FreqLikelihood(f), fTrue - sigmaNoise/10, fTrue + sigmaNoise/10 );
+mu2F = integral( @(f) f * f * FreqLikelihood(f), fTrue - sigmaNoise/10, fTrue + sigmaNoise/10 );
+sigmaF = sqrt( mu2f - muF*muF );
+
+posteriorStats = 
+
+end

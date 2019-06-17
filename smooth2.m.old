@@ -1,0 +1,27 @@
+function MatrixOut = smooth2( MatrixIn, RowSpan, ColumnSpan )
+
+%Initial error statements and definitions 
+if nargin<2, error('Not enough input arguments!'), end 
+
+Nr = RowSpan;
+Nc = ColumnSpan; 
+
+N(1) = Nr;  
+if nargin<3  
+    N(2) = N(1);  
+else 
+    N(2) = Nc; 
+end 
+ 
+if length(N(1))~=1, error('Nr must be a scalar!'), end 
+if length(N(2))~=1, error('Nc must be a scalar!'), end 
+ 
+[row,col] = size(MatrixIn); 
+eL = spdiags(ones(row,2*N(1)+1),(-N(1):N(1)),row,row); 
+eL = eL./(repmat(sum(eL,1),row,1)); 
+eR = spdiags(ones(col,2*N(2)+1),(-N(2):N(2)),col,col); 
+eR = eR./(repmat(sum(eR,2),1,col)); 
+ 
+MatrixOut = eL*MatrixIn*eR;
+
+end

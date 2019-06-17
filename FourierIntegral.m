@@ -1,0 +1,56 @@
+function fHat = FourierIntegral( t, f, omega, varargin )
+
+% Wrapper for multiple frequencies, window functions and custom Fourier parameters
+
+%% Parse optional Fourier parameters
+input = inputParser;
+defaultFourierParameters = [ 0 1 ];
+defaultWindowFunction = @rectwin;
+defaultDimension = 1;
+
+input.addParameter( 'Dimension', defaultDimension, @IsPositiveInteger );
+input.addParameter( 'FourierParameters', defaultFourierParameters, @(fp) ( isvector(fp) && numel(fp)==2 ) );
+input.addParameter( 'WindowFunction', defaultWindowFunction, @(fh) isa( fh, 'function_handle' ) );
+
+parse( input, varargin{:} );
+a = input.Results.FourierParameters(1);
+b = input.Results.FourierParameters(2);
+WindowFcn = input.Results.WindowFunction;
+dimension = input.Results.Dimension;
+
+%% Evaluating FT for multiple frequencies
+
+
+fHat = FourierIntegralSingleFrequency( ...
+    t, ...
+    f, ...
+    omega, ...
+    dimension, ...
+    WindowFcn, ...
+    a, b ...
+    ) ./ ...
+FourierIntegralSingleFrequency( ...
+    t, ...
+    ones(size(f)), ...
+    0, ...
+    dimension, ...
+    WindowFcn, ...
+    a, b ...
+    );
+
+end
+
+function fHat = FourierIntegralSingleFrequency( t, f, omega, dimension, WindowFcn, a, b )
+
+normalization = sqrt( rdivide( abs(b), power( 2*pi, 1-a ) ) );
+exponent = ToColumn( exp( 1i * b * omega .* t ) );
+window = ToColumn( WindowFcn( length(t) ) );
+
+sizeIntegrand = size( f );
+sizeIntegrand(dimension) = 1;
+
+integrand = f .* repmat( shiftdim( normalization .* exponent .* window, dimension-1 ), sizeIntegrand );
+
+fHat = normalization * trapz( t, integrand, dimension  );
+
+end

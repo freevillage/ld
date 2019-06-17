@@ -1,0 +1,70 @@
+% developing the TLS-prony method
+% julius kusuma <kusuma@mit.edu>
+% 070177
+
+% June 21, 2008:  This version appears to actually work for K=1!
+% June 21, 2008:  Start development for K>1.
+
+clear all;
+format long;
+
+%% signal parameter
+c = [0.1 1]';
+u = [0.8 -1.8]';
+u = exp(j*u);
+K = length(u);
+N = 16;  L = 4;
+sig = 0.000000001;
+
+%% generate signal
+n = (0:N-1)';
+A = ( ones(N,1)*u.' ) .^ ( n*ones(1,K) );
+x = A * c;
+y = x + sig*randn(size(x));
+
+%% try an older script
+[u_hat] = TLSPronyC(y,K,K);
+
+
+%% estimation parameter
+% %% TLS part
+% Ymat = hankel(y(1:L), y(L:N))';
+% [U,S,V] = svd(Ymat);
+% S_d = S;
+% S_d(L+1:end, L+1:end) = 0;
+% Yden = U*S_d*V';        % denoised matrix
+% yd = Yden(:,L);         % denoised "LP"
+% Pd = Yden(:,1:end);     % denoised "data"
+% b_hat = -pinv(Pd)*yd;   % LinPred coeffs
+% % y_d = [Ymat_d(:,1)];        % Ymat_d(end,2:end)'];
+% % b_hat = -pinv(Ymat_d)*y_d;
+% 
+% %% map to our parameters
+% if(length(b_hat)>1)
+%     u_guess = (roots(b_hat));
+% else
+%     u_guess = (b_hat);
+% end
+% u = u(:);  u_guess = u_guess(:);
+% A_guess = ( ones(N,1)*u_guess.' ) .^ ( n*ones(size(u_guess.')) );
+% %%% estimate coefficients
+% c_guess = y\A_guess;
+% %%% 
+% [conf, guess] = sort(abs(c_guess));
+% c_hat = c_guess(guess(1:K));
+% u_hat = u_guess(guess(1:K));
+% 
+% % err = (u-u_hat).^2;
+
+%% show results
+figure(1);
+drawcircle;
+hold on;
+plot(real(u), imag(u), 'ko');
+% plot(real(u_guess), imag(u_guess), 'bd' );
+plot(real(u_hat), imag(u_hat), 'rx' );
+hold off;
+axis([-5 5 -5 5]);
+grid;
+
+

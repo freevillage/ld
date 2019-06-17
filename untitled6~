@@ -1,0 +1,10 @@
+function result = MultidimensionalArrayFun( f, array )
+
+sizeFx = size( f( array(1) ) );
+sizeArray = size( array );
+
+sizeResult = squeeze( [ sizeFx sizeArray ] );
+
+
+
+end

@@ -1,0 +1,111 @@
+function AfOptimal = DFSMaxLikelihoodSingleAmplitudePhaseSingleSnapshot( signal, sigmaNoise )
+
+% Initial approximation
+freqApproximate = DiscreteFrequencySpectrum( signal, 'Method', 'MatrixPencil' ); 
+amplitudeApproximate = mean( abs( ToColumn( signal ) ) );
+phaseApproximate = 2*pi * rand;
+
+initialGuess = [ amplitudeApproximate; freqApproximate; phaseApproximate ];
+
+options = optimoptions( @fmincon, ...
+    'Display', 'off', ...
+    'Algorithm', 'sqp', ...
+    'MaxFunEvals', 100000, ...
+    'TolCon', 1e-18, ...
+    'TolX', 1e-18 ...
+    );
+%options = optimoptions( 'fmincon' );
+
+problem.options = options;
+problem.solver = 'fmincon';
+problem.objective = @(Afs) - LogLikelihoodUnnormalized( Afs, ReIm(signal), sigmaNoise );
+problem.x0 = initialGuess;
+problem.lb = [0.99, -1, -0.01];
+problem.ub = [1.01*amplitudeApproximate, 1, 0.01];
+
+% gs = GlobalSearch( ...
+%     'StartPointsToRun', 'bounds', ...
+%     'Display', 'off', ...
+%     'NumStageOnePoints', 1000, ...
+%     'TolX', 0, ...
+%     'TolFun', 0 );
+
+gs = GlobalSearch( ...
+    'Display', 'off', ...
+    'NumStageOnePoints', 1000 );
+
+
+% ms = MultiStart( ...
+%     'StartPointsToRun', 'bounds', ...
+%     'TolX', 0, ...
+%     'TolFun', 0 );
+    
+
+AfOptimal = fmincon( problem );
+%AfOptimal = run( gs, problem );
+%AfOptimal = run( ms, problem, 100 );
+
+% 
+% posteriorStats = PosteriorF( ReIm(signal), phaseApproximate, sigmaNoise );
+% 
+% phase = posteriorStats(1);
+
+
+
+end
+
+function xy = ReIm( z )
+
+assert( isvector ( z ) );
+zColumn = ToColumn( z );
+xyColumn = [ real( zColumn ) ; imag( zColumn ) ];
+
+if iscolumn( z )
+    xy = xyColumn;
+else
+    xy = transpose( xyColumn );
+end
+
+end
+
+function y = CleanSignal( Af0, Nantennas )
+
+y = ToColumn( Af0(1) .* exp( 1i * pi * Af0(2) * ( 0 : Nantennas-1 ) ) * exp( 1i*pi*Af0(3) ) );
+
+end
+
+function ml = MeanLikelihood( Af0, Nantennas )
+
+cleanSignal = CleanSignal(Af0, Nantennas);
+
+ml = [ real( cleanSignal ) ; imag( cleanSignal ) ];
+
+end
+
+
+function lu = LogLikelihoodUnnormalized( Afs, observedData, sigmaNoise )
+
+Nantennas = length( observedData ) / 2;
+totalAfs = size( Afs, 2 );
+
+lu = nan( totalAfs, 1 );
+
+for i = 1 : totalAfs
+    %lu(i) = logmvnpdf( observedData, MeanLikelihood(Afs(:,i),Nantennas), CovLikelihood(sigmaNoise,Nantennas) );
+    lu(i) = sum( lognormpdf( observedData, MeanLikelihood(Afs(:,i),Nantennas), ToColumn( diag( CovLikelihood(sigmaNoise,Nantennas) ) ) ) );
+end
+
+end
+
+function cl = CovLikelihood( sigma, Nantennas )
+
+cl = sigma * sigma * eye( 2*Nantennas );
+
+end
+
+
+function fl = FreqLikelihood( freqs, observedData, sigmaNoise, normalization )
+
+fl = LikelihoodUnnormalized( freqs, observedData, sigmaNoise ) / normalization;
+
+end

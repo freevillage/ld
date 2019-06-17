@@ -1,0 +1,253 @@
+%% Locating source from a moving platform using MUSIC
+%
+%% Source description
+%
+addpath( genpath( '.' ) )
+sourcePosition = ToColumn( [ 0, 0, 0 ] );
+freqMin = 300 * 10^6; % minimum possible frequency
+freqMax = 300 * 10^6; % maximum possible frequency
+totalSources = 1; % number of monochromatic components in a source
+c = LightSpeed;
+freqSource = sort( RandomUniform( freqMin, freqMax, [1 totalSources] ) ); % source frequencies
+phaseSource = RandomUniform( 0, 2*pi, [1 totalSources] ); % source phases
+freqCentral = mean( freqSource );
+amplitudeSource = ones( [1 totalSources] ); % amplitudes
+
+source = PolychromaticSource( ...
+    sourcePosition, ...
+    amplitudeSource, ...
+    freqSource, ...
+    phaseSource );
+%% Array geometry
+%
+% 
+%
+arrayLengthX = 1;
+arrayLengthY = 1;
+totalAntennasX = 31;
+totalAntennasY = 33;
+arraySpacingX = arrayLengthX/(totalAntennasX-1);
+arraySpacingY = arrayLengthY/(totalAntennasY-1);
+
+array = UniformRectangularAntennaArray( ...
+    [ totalAntennasX totalAntennasY ], ...
+    [ arraySpacingX arraySpacingY ] ...
+    );
+%% Description of platform motion
+%
+% 
+%
+initialArrayPosition = [-400; 0; 300000];
+arraySpeed = 40;
+
+GetArrayPosition = @(t) initialArrayPosition + arraySpeed * [ t; cos(t); sin(t) ] / sqrt(2);
+GetRotationAboutX = @(t) cos(t);
+GetRotationAboutY = @(t) sin(t);
+GetRotationAboutZ = @(t) cos(4*t);
+
+movingUra = MovingURA( array, ...
+    GetArrayPosition, ...
+    GetRotationAboutX, ...
+    GetRotationAboutY, ...
+    GetRotationAboutZ ...
+    );
+
+%% Discrete times of data recording
+%
+slowTimeBeg = 0;
+slowTimeEnd = 20;
+slowSamplingPeriod = 1;
+slowTime = slowTimeBeg : slowSamplingPeriod : slowTimeEnd;
+totalSlowTimes = length( slowTime );
+
+fastSamplingPeriod = 1e-9;
+fastRecordingTime = 3e-9;
+fastDelay = 0 : fastSamplingPeriod : fastRecordingTime;
+totalFastTimes = length( fastDelay );
+
+fastTime = PairwiseSum( fastDelay, slowTime );
+
+arrayPosition = MultidimensionalArrayFun( movingUra.positionFcn, fastTime);
+receiverPosition = movingUra.GetAntennaPositions( fastTime );
+
+%% Display geometry
+%
+% 
+%
+figure, hold on
+Plot3dData( source.position, 'rp', 'MarkerFaceColor', 'r', 'MarkerSize', 15 );
+Plot3dData( arrayPosition(:,1,:), 'g-' );
+Plot3dData( arrayPosition(:,1,1), 'go', 'MarkerFaceColor', 'g' );
+Plot3dData( arrayPosition(:,1,end), 'go', 'MarkerFaceColor', 'r' );
+view( [-13 30] )
+legend( 'Source location', 'Platform path', 'Starting point', 'End point' )
+grid on
+xlabel( 'Easting [m]' ), ylabel( 'Northing [m]' ), zlabel( 'Altitude [m]' )
+title( 'Experiment geometry' )
+hold off
+
+%% True angles
+%
+% 
+
+anglesTrue = MultidimensionalArrayFun( ...
+    @(time) TrueAngles( movingUra, source, time ), ...
+    fastTime ...
+    );
+
+
+%% Simulating recorded data
+%
+% 
+%
+cleanData = RecordedDataUra( receiverPosition, source, fastTime );
+
+%%
+%
+% Estimating directions of arrival using different methods
+%
+FastTimeGather = @(data,iSlowTime) data(:,:,:,iSlowTime);
+
+methodDescriptions = { ...
+    { 'Method', 'CorrelationSinglePhase' }, ...
+    { 'Method', 'Prony' }, ...
+    { 'Method', 'TotalLeastSquaresProny' }, ...
+    { 'Method', 'MatrixPencil' }, ...
+    { 'Method', 'RootMusic' }, ...
+    { 'Method', 'Music', 'FrequencySensitivity', 1e-4, 'TotalRefinements', 4, 'RefinementFactor', 10 }, ...
+    { 'Method', 'Esprit' }, ...
+    { 'Method', 'MaximumLikelihoodSinglePhase', 'NoiseStandardDeviation',  }
+    };
+
+methodDescriptions = methodDescriptions([1 2 8] );
+
+totalMethods = length( methodDescriptions );
+
+methodNames = GetMethodNamesFromDescriptions( methodDescriptions );
+
+noiseSnrMin = 1; %dB
+noiseSnrMax = 10^3; %dB
+totalSnrs = 5;
+noiseSnr = linspace( noiseSnrMin, noiseSnrMax, totalSnrs );
+
+anglesEstimated = nan( 2, totalSlowTimes, totalMethods, totalSnrs );
+
+progressBarSnr = waitbar( 0, 'Processing SNRs...' );
+progressBarMethods = waitbar( 0, 'Estimating DOAs... ' );
+progressBarTimes = waitbar( 0, 'Processing slow times...' );
+
+for mSnr = 1 : totalSnrs
+    
+    recordedData = nan( size( cleanData ) );
+    
+    for kSlow = 1 : totalSlowTimes
+        recordedData(:,:,:,kSlow) = AddWhiteGaussianNoise( cleanData(:,:,:,kSlow), ...
+            noiseSnr(mSnr), 'measured' );
+    end
+    
+    
+    for iMethod = 1 : totalMethods
+        thisMethod = methodDescriptions{iMethod};
+        thisMethodName = methodNames{iMethod};
+        waitbar( (iMethod-1)/totalMethods, progressBarMethods, sprintf( 'Estimating DOAs using %s', thisMethodName ) );
+        
+        for kSlow = 1 : totalSlowTimes
+            anglesEstimated(:,kSlow,iMethod,mSnr) = DirectionsOfArrivalUra( ...
+                FastTimeGather( recordedData, kSlow ), ...
+                freqCentral, ...
+                [arraySpacingX arraySpacingY], ...
+                'TotalFrequencies', totalSources, ...
+                thisMethod{:} );
+            
+            waitbar( kSlow/totalSlowTimes, progressBarTimes );
+        end
+        
+        
+    end
+    
+    waitbar( mSnr/totalSnrs, progressBarSnr );
+    
+end
+
+delete( progressBarMethods );
+delete( progressBarTimes );
+delete( progressBarSnr );
+
+%% Location using estimated angles
+
+sourcePositionEstimated = nan( 3, totalMethods, totalSnrs );
+
+for mSnr = 1 : totalSnrs
+    for iMethod = 1 : totalMethods
+        sourcePositionEstimated(:,iMethod,mSnr) = Doa2Pos( ...
+            arrayPosition(:,1,:), ...
+            movingUra.rotationXFcn(slowTime), ...
+            movingUra.rotationYFcn(slowTime), ...
+            movingUra.rotationZFcn(slowTime), ...
+            anglesEstimated(1,:,iMethod,mSnr), anglesEstimated(2,:,iMethod,mSnr) );
+    end
+end
+
+sourcePositionMatrix = repmat( sourcePosition, 1, totalMethods, totalSnrs );
+sourcePositionEstimationMismatch = sourcePositionEstimated - sourcePositionMatrix;
+
+sourcePositionMismatchX = abs(squeeze( sourcePositionEstimationMismatch(1,:,:) ));
+sourcePositionMismatchY = abs(squeeze( sourcePositionEstimationMismatch(2,:,:) ));
+sourcePositionMismatchZ = abs(squeeze( sourcePositionEstimationMismatch(3,:,:) ));
+sourcePositionMismatchRms = sqrt(squeeze(sum(sourcePositionEstimationMismatch .^ 2)));
+
+figure
+
+subplot( 2, 2, 1 )
+loglog( 10.^(noiseSnr/20), sourcePositionMismatchX', '.-', 'MarkerSize', 20 );
+set( gca, ...
+    'XTick', logspace( 0, 5, 6 ), ...
+    'YTick', logspace( -3, 2, 6 ) );
+grid on
+ylim( [0 100] );
+xlabel( 'SNR')
+ylabel( 'Error [m]' )
+title( 'Error in X' )
+legend( methodNames{:} )
+
+subplot( 2, 2, 2 )
+loglog( 10.^(noiseSnr/20), sourcePositionMismatchY', '.-', 'MarkerSize', 20 );
+set( gca, ...
+    'XTick', logspace( 0, 5, 6 ), ...
+    'YTick', logspace( -3, 2, 6 ) );
+grid on
+ylim( [0 100] );
+xlabel( 'SNR')
+ylabel( 'Error [m]' )
+title( 'Error in Y' )
+
+subplot( 2, 2, 3 )
+loglog( 10.^(noiseSnr/20), sourcePositionMismatchZ', '.-', 'MarkerSize', 20 );
+set( gca, ...
+    'XTick', logspace( 1, 6, 6 ), ...
+    'YTick', logspace( -3, 2, 6 ) );
+grid on
+ylim( [0 100] );
+xlabel( 'SNR')
+ylabel( 'Error [m]' )
+title( 'Error in Z' )
+
+subplot( 2, 2, 4 )
+loglog( 10.^(noiseSnr/20), sourcePositionMismatchRms', '.-', 'MarkerSize', 20 );
+set( gca, ...
+    'XTick', logspace( 1, 6, 6 ), ...
+    'YTick', logspace( -3, 2, 6 ) );
+grid on
+ylim( [0 100] );
+xlabel( 'SNR')
+ylabel( 'Error [m]' )
+title( 'Total error' )
+
+suptitle( 'Source Position Estimation Errors' )
+
+%%
+
+save test_resolution_doa_methods_ml
+
+
+

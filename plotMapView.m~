@@ -1,0 +1,8 @@
+function h = plotMapView( varagrin )
+
+% If the first two arguments aren't of type GraphAxis, then all arguments
+% are assumed to conform to the pcolor syntax and fed to that function
+
+if( ~( isa( varargin{ 1 }, 'GraphAxis' ) & 
+
+end % of plotMapView

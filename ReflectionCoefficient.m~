@@ -1,0 +1,15 @@
+function R = ReflectionCoefficient( IncidentVelocity, ReflactedVelocity, varargin )
+
+if( nargin == 2 )
+    IncidenceAngle = 0;
+else
+    IncidenceAngle = varargin{ 1 };
+end
+
+RefractionAngle = SnellsLaw( IncidenceAngle, IncidentVelocity, ReflactedVelocity );
+ProjectedIncidentVelocity = IncidentVelocity * cos( IncidenceAngle );
+ProjectedRefractedVelocity = RefractedVelocity * cos( RefractedAngle );
+
+R = ( ProjectedIncidentVelocity - 
+
+end

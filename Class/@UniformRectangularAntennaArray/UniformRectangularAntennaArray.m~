@@ -1,0 +1,59 @@
+classdef UniformRectangularAntennaArray
+   
+    properties
+        totalRows % Ny
+        totalCols % Nx
+        rowSpacing % dy
+        colSpacing % dx
+    end
+    
+    properties( Dependent = true )
+        size
+        totalAntennas
+        antennaPosition
+    end
+    
+    methods
+        
+        function ura = UniformRectangularAntennaArray( dimenstions, spacing )
+            ura.totalCols = dimenstions(1);
+            ura.totalRows = dimenstions(2);
+            ura.colSpacing = spacing(1);
+            ura.rowSpacing = spacing(2);
+        end
+        
+        function totalAnt = get.totalAntennas( ura )
+            totalAnt = ura.totalRows * ura.totalCols;
+        end
+        
+        function uraSize = get.size( ura )
+            assert( ura.totalRows > 1 && ura.totalCols > 1 )
+            uraSize = [ ...
+                ura.rowSpacing * ( ura.totalRows - 1 ), ...
+                ura.colSpacing * ( ura.totalCols - 1 ) ];
+        end
+        
+        function antennaPos = get.antennaPosition( ura )
+           xGrid = linspace( -ura.size(1)/2, ura.size(1)/2, ura.totalCols );
+           yGrid = linspace( -ura.size(2)/2, ura.size(2)/2, ura.totalRows );
+           [ xMesh, yMesh ] = ndgrid( xGrid, yGrid );
+           antennaPos = nan( [ 2, size( xMesh ) ] );
+           antennaPos(1,:,:) = xMesh;
+           antennaPos(2,:,:) = yMesh;
+        end
+        
+        function disp( ura )
+            figure( 'Name', inputname( 1 ) )
+            antennaPositionsReshaped = reshape( ura.antennaPosition, 2, ura.totalAntennas );
+            plot( antennaPositionsReshaped(1,:), antennaPositionsReshaped(2,:), ...
+                'g^', ...
+                'MarkerFaceColor', 'g' ...
+                );
+            set( gca, ...
+                'XTick', antennaPositionsReshaped(1,:) )
+        end
+        
+    end
+    
+end
+

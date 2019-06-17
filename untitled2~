@@ -1,0 +1,6 @@
+clockShifts = 0 : 500 : 4500;
+totalClockShifts = length( clockShifts );
+
+for jClockShift = 1 : totalClockShifts
+    
+end

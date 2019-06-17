@@ -1,0 +1,9 @@
+function I = RiemannIntegral( x, f, A, B )
+
+Beginning = min( x > A );
+End = max( x < B );
+Interval = Beginning : End;
+
+I = trapz( x( Interval ), f(
+
+end

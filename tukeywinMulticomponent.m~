@@ -1,0 +1,11 @@
+function window = tukeywinMulticomponent( subset, N, R )
+
+[ totalComponents, begComponent, endComponent ] = findConnectedComponents( subset, N );
+window = zeros( 1, N );
+
+for indexComponent = 1 : totalComponents
+    window( begComponent( indexComponent ) : endComponent( indexComponent ) ) ...
+        = tukeywin( 
+end
+
+end

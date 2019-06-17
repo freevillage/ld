@@ -1,0 +1,11 @@
+function [ PaddedAxis, PaddedSignal ] = PadSignal( Axis, Signal, NewMinValue, NewMaxValue )
+
+% This function preserves the step on the absciss. Therefore the new
+% MaxValue may not be exactly what's prescribed
+
+PaddedAxis = 
+
+
+
+
+end

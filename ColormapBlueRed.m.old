@@ -1,0 +1,27 @@
+function []=ColormapBlueRed(varargin)
+%
+% Use blue and red colormap. COLORMAP_BLUERED(ncol,type) generates a colormap consisting of ncol
+% colors (default=1025). Use odd number of colors for value zero to be mapped as white. Type specifies
+% whether a linear (default) or parabolic color-scaling is to be used.
+%
+% Remco Muijs
+% 06-03-2002
+
+
+nargin=length(varargin);
+
+switch nargin
+case{0}; ncol=1025;pow=1;
+case{1};ncol=varargin{1};pow=1;
+case{2};ncol=varargin{1};pow=varargin{2};
+end
+
+
+step=1/(floor(ncol./2));
+col1=[0:step:1-step ones(1,floor(ncol/2)+1)].^pow';
+col2=[0:step:1-step 1 1-step:-step:0].^pow';
+col3=[ones(1,floor(ncol/2)+1) 1-step:-step:0].^pow';
+colormap([col1 col2 col3]);
+
+%set value zero as center of caxis (for white background)
+caxis([-max(abs(caxis)) max(abs(caxis))]);

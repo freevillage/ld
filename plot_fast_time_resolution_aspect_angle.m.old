@@ -1,0 +1,85 @@
+initialAltitude = 3000;
+clockShift = 0;
+sigmaNoise = 1e-12;
+
+totalPeriods = 40;
+totalAngles = 20;
+totalMethods = 1;
+saveDirectory = '/scratch/poliann/mat_all_new';
+
+numberPeriods = round( logspace( 2, 4, totalPeriods ) );
+aspectAngles = linspace( 0, pi/2, totalAngles );
+% coeffs = logspace( 0, 5, 6 );
+
+totalAngles = length( aspectAngles );
+
+arraySpeed = 40;
+
+parfor jAngle = 1 : totalAngles
+    for iPeriod = 1 : totalPeriods
+        test_doa_methods_all( numberPeriods(iPeriod), initialAltitude, clockShift, aspectAngles(jAngle), sigmaNoise, arraySpeed )
+    end
+%     plot_doa_resolution_results
+    
+end
+
+%%
+
+angleEstimationErrorNorm = nan( 2, totalAngles, totalPeriods, totalMethods );
+methodNames = cell( totalMethods, 1 );
+
+
+for jAngle = 1 : totalAngles
+    for iPeriod = 1 : totalPeriods
+        filename = fullfile( saveDirectory, sprintf( 'test_doa_results_%.0f_%.2f_%.2f_%.2f_%.2f_%.2f.mat', ...
+            numberPeriods(iPeriod), initialAltitude, clockShift, aspectAngles(jAngle), log10(sigmaNoise), arraySpeed ) );
+        savedResults = load( filename );
+        for kMethod = 1 : totalMethods
+            methodNames{kMethod} = savedResults.methodDescriptions{kMethod}{2};
+            anglesTrue = savedResults.anglesTrue(:,:,1);
+            anglesEstimated = savedResults.anglesEstimated(:,:,kMethod);
+            
+            angleEstimationErrorNorm(:,jAngle,iPeriod,kMethod) = sqrt( sum( transpose( abs( anglesEstimated - anglesTrue ) ) ) .^2 );
+        end
+    end
+end
+
+
+
+%%
+
+numberPeriodsOptimal = nan( totalAngles, 2 );
+
+for jAngle = 1 : totalAngles
+    [numberPeriodsOptimal(jAngle,1),~] = FindMinimum( numberPeriods, squeeze( angleEstimationErrorNorm(1,jAngle,:,1) ) );
+    [numberPeriodsOptimal(jAngle,2),~] = FindMinimum( numberPeriods, squeeze( angleEstimationErrorNorm(2,jAngle,:,1) ) );
+end
+
+figure( 'Visible', 'On' )
+plotError = loglog( numberPeriods, squeeze( angleEstimationErrorNorm(1,:,:,1) ), ...
+    '-o', ...
+    'LineWidth', 2, ...
+    'MarkerFaceColor', 'auto' );
+%xlim( [0 4000] )
+xlabel( 'Fast time recording window [periods]' )
+ylabel( 'Angle estimation RMS error' )
+title( 'Angle estimation error as function of aspect angle' )
+orient landscape
+aspectAngleLabels = arrayfun( @(a) [num2str(a),'^{\circ}'], round(rad2deg(aspectAngles)), 'UniformOutput', false );
+legend( aspectAngleLabels{:}, 'Location', 'NorthWest' )
+set( plotError(end), 'LineWidth', 5 )
+grid on
+print -dpdf html/error_tau_aspect_angle
+
+figure( 'Visible', 'On' )
+plot( rad2deg(aspectAngles), numberPeriodsOptimal(:,1), '-o', ...
+    rad2deg(aspectAngles), numberPeriodsOptimal(end,1) ./ sin(aspectAngles), '-d', ...
+    'LineWidth', 2 )
+xlabel( 'Aspect angle [deg]' )
+ylabel( 'Fast time recording window [periods]' )
+title( 'Optimal fast time window' )
+grid on
+legend( '\tau_{optimal}', 'C / sin(\alpha)' )
+orient landscape,
+print -dpdf html/optimal_tau_angle
+save( fullfile( saveDirectory, 'plot_angle.mat' ), '-v7.3' )

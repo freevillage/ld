@@ -1,0 +1,481 @@
+function output = GetSourceLocationByFrequencyTemplateMatching3D( varargin )
+
+%% Parse input
+input = inputParser;
+
+defaultClockShift = 0; % Hz
+defaultAspectAngle = pi/2; % rad
+defaultSigmaNoise = 1e-9; 
+defaultSourceFrequency = 300e6; % Hz
+defaultSourcePhase = 0;
+defaultSourcePositionFcn = @(t) [0; 0; 0]; % m
+defaultSourceAmplitude = 1;
+defaultSlowTimeStart = 0;
+defaultSlowTimeEnd = 0;
+defaultSlowTimeSamplingFrequency = 1; % Hz
+defaultFastTimeStart = 0;
+defaultFastTimeEnd = 1e-6; % sec
+defaultFastTimeSamplingFrequency = 1e9; % Hz
+defaultArrayPositionFcn = @(t) [ -400; 0; 3000 ]; % historic initial position of no physical significance
+defaultRotationFcn = @(t) eye(3);
+defaultAssumedRotationFcn = [];
+c = physconst('LightSpeed');
+defaultWavelength = c/defaultSourceFrequency;
+defaultTotalElements = [ 11 11 ];
+defaultElementSpacing = defaultWavelength * [0.5 0.5];
+defaultMethodDescription = { 'Method', 'Prony' };
+defaultActiveArrayWindow = [];
+defaultFourierTransformLength = 2^22;
+defaultFourierWindowFcn = @tukeywin;
+defaultRandomNumberGenerator = { 'default' };
+
+addParameter( input, 'SourceClockShift', defaultClockShift, @isscalar );
+addParameter( input, 'AspectAngle', defaultAspectAngle, @isscalar );
+addParameter( input, 'SigmaNoise', defaultSigmaNoise, @IsPositiveScalar );
+addParameter( input, 'SourceFrequency', defaultSourceFrequency, @IsPositiveScalar );
+addParameter( input, 'SourcePhase', defaultSourcePhase, @isscalar );
+addParameter( input, 'SourceAmplitude', defaultSourceAmplitude, @IsPositiveScalar );
+addParameter( input, 'SourcePositionFcn', defaultSourcePositionFcn, @(fh) isa(fh, 'function_handle') || iscell(fh) );
+addParameter( input, 'SlowTimeStart', defaultSlowTimeStart, @isscalar );
+addParameter( input, 'SlowTimeEnd', defaultSlowTimeEnd, @isscalar );
+addParameter( input, 'SlowTimeSamplingFrequency', defaultSlowTimeSamplingFrequency, @IsPositiveScalar );
+addParameter( input, 'FastTimeStart', defaultFastTimeStart, @isscalar );
+addParameter( input, 'FastTimeEnd', defaultFastTimeEnd, @isscalar );
+addParameter( input, 'FastTimeSamplingFrequency', defaultFastTimeSamplingFrequency, @IsPositiveScalar );
+addParameter( input, 'ArrayPositionFcn', defaultArrayPositionFcn, @(fh) isa(fh, 'function_handle') );
+addParameter( input, 'RotationFcn', defaultRotationFcn, @(fh) isa(fh, 'function_handle')  );
+addParameter( input, 'RotationAssumedFcn', defaultAssumedRotationFcn, @(fh) isa(fh, 'function_handle') || isempty(fh)  );
+addParameter( input, 'TotalElements', defaultTotalElements, @isvector );
+addParameter( input, 'ElementSpacing', defaultElementSpacing, @isvector );
+addParameter( input, 'MethodDescription', defaultMethodDescription, @(methodDescription) ischar(methodDescription) || iscell(methodDescription)  );
+addParameter( input, 'ActiveArrayWindow', defaultActiveArrayWindow );
+addParameter( input, 'FourierTransformLength', defaultFourierTransformLength, @IsPositiveInteger );
+addParameter( input, 'FourierWindowFunction', defaultFourierWindowFcn, @(fh) isa(fh, 'function_handle')  );
+addParameter( input, 'RandomNumberGenerator', defaultRandomNumberGenerator, @iscell );
+
+if isempty(varargin{1})
+    varargin = { 'SourceClockShift', defaultClockShift };
+end
+parse( input, varargin{:} );
+
+totalAntennasX = input.Results.TotalElements(1);
+totalAntennasY = input.Results.TotalElements(2);
+
+activeArrayWindow = input.Results.ActiveArrayWindow;
+if isempty( activeArrayWindow )
+    activeArrayWindow = { 1 : totalAntennasX, 1 : totalAntennasY };
+end
+
+if iscell( input.Results.SourcePositionFcn ) 
+    GetSourcePosition = input.Results.SourcePositionFcn;
+else
+    GetSourcePosition = {input.Results.SourcePositionFcn};
+end
+
+totalSources = length( GetSourcePosition );
+
+sourceFrequency = PadSourceParameters( input.Results.SourceFrequency, totalSources );
+sourcePhase = PadSourceParameters( input.Results.SourcePhase, totalSources );
+sourceAmplitude = PadSourceParameters( input.Results.SourceAmplitude, totalSources );
+sourceClockShift = PadSourceParameters( input.Results.SourceClockShift, totalSources );
+
+GetArrayPosition = input.Results.ArrayPositionFcn;
+GetRotation = input.Results.RotationFcn;
+
+GetAssumedRotation = input.Results.RotationAssumedFcn;
+if isempty( GetAssumedRotation ), GetAssumedRotation = GetRotation; end
+
+
+%% Generate array path
+
+slowTime = input.Results.SlowTimeStart : 1/input.Results.SlowTimeSamplingFrequency : input.Results.SlowTimeEnd;
+totalSlowTimes = length( slowTime );
+
+fastDelay =  input.Results.FastTimeStart : 1/input.Results.FastTimeSamplingFrequency : input.Results.FastTimeEnd;
+totalFastTimes = length( fastDelay );
+
+% indFastTimeUsed = find( ...
+%     allFastDelay >= input.Results.FastTimeStart && ...
+%     allFastDelays <= input.Results.FastTimeEnd );
+% 
+% totalFastTimesUsed = length( fastDelay );
+
+fastTime = bsxfun( @plus, ToColumn(slowTime), ToRow(fastDelay) );
+
+arrayPosition = nan( 3, totalSlowTimes, totalFastTimes );
+receiverPosition = nan( totalSlowTimes, totalFastTimes, 3, totalAntennasX, totalAntennasY );
+
+arrayAssumedPosition = nan( 3, totalSlowTimes, totalFastTimes );
+receiverAssumedPosition = nan( totalSlowTimes, totalFastTimes, 3, totalAntennasX, totalAntennasY );
+
+for iSlow = 1 : totalSlowTimes
+    for jFast = 1 : totalFastTimes
+        thisFastTime = fastTime(iSlow,jFast);
+        thisArrayPosition = GetArrayPosition( thisFastTime );
+        thisRotation = GetRotation( thisFastTime );
+        thisAssumedRotation = GetAssumedRotation( thisFastTime );
+        
+        arrayPosition(:,iSlow,jFast) = thisArrayPosition;
+        arrayAssumedPosition(:,iSlow,jFast) = thisArrayPosition;
+        
+        receiverPosition(iSlow,jFast,:,:,:) = UniformLinearArray2D( ...
+            (input.Results.TotalElements-1) .* input.Results.ElementSpacing, ...
+            input.Results.TotalElements, ...
+            thisArrayPosition, ...
+            thisRotation );
+        receiverAssumedPosition(iSlow,jFast,:,:,:) = UniformLinearArray2D( ...
+            (input.Results.TotalElements-1) .* input.Results.ElementSpacing, ...
+            input.Results.TotalElements, ...
+            thisArrayPosition, ...
+            thisAssumedRotation );
+    end
+end
+
+
+%% True angles
+% 
+% anglesTrue = nan( 2, totalSources, totalSlowTimes, totalFastTimes );
+% 
+% for iSource = 1 : totalSources
+%     thisGetSourcePosition = GetSourcePosition{iSource};
+%     for iSlow = 1 : totalSlowTimes
+%         for jFast = 1 : totalFastTimes
+%             thisArrayPosition = ToColumn( arrayPosition(:,iSlow,jFast) );
+%             thisFastTime = fastTime(iSlow,jFast);
+%             thisRotationMatrix = GetRotation( thisFastTime );
+%             thisSourcePosition = ToColumn( thisGetSourcePosition( thisFastTime ) );
+%             
+%             xRotated = thisRotationMatrix * [1;0;0];
+%             yRotated = thisRotationMatrix * [0;1;0];
+%             
+%             anglesTrue(1,iSource,iSlow,jFast) = pi/2 - AngleBetweenVectors3D(thisSourcePosition - thisArrayPosition, xRotated );
+%             anglesTrue(2,iSource,iSlow,jFast) = pi/2 - AngleBetweenVectors3D(thisSourcePosition - thisArrayPosition, yRotated );
+%         end
+%     end
+% end
+
+%% Simulating recorded data
+rng( input.Results.RandomNumberGenerator{:} );
+
+recordedData = nan( totalSources, totalSlowTimes, totalFastTimes, totalAntennasX, totalAntennasY );
+cleanData    = nan( totalSources, totalSlowTimes, totalFastTimes, totalAntennasX, totalAntennasY );
+dataSNR = nan( totalSources, totalSlowTimes );
+
+for iSource = 1 : totalSources
+    thisGetSourcePosition = GetSourcePosition{iSource};
+    for kSlow = 1 : totalSlowTimes
+        for lFast = 1 : totalFastTimes
+            thisFastTime = fastTime(kSlow,lFast);
+            thisSourcePosition = ToColumn( thisGetSourcePosition( thisFastTime ) );
+            for ix = 1 : totalAntennasX
+                for jy = 1 : totalAntennasY
+                    thisReceiverPosition = ToColumn( squeeze( receiverPosition( kSlow, lFast, :, ix, jy ) ) );
+                    sourceReceiverDistance = norm( thisSourcePosition - thisReceiverPosition );
+                    cleanData(iSource,kSlow,lFast,ix,jy) = RecordedDataTime( ...
+                        thisFastTime, ...
+                        sourceReceiverDistance, ...
+                        sourceAmplitude(iSource), ...
+                        sourceFrequency(iSource) + sourceClockShift, ...
+                        sourcePhase(iSource) );
+                end
+            end
+        end
+        
+        
+        sizeNoise = [totalFastTimes, totalAntennasX, totalAntennasY];
+        dataNoise = input.Results.SigmaNoise * ( randn( sizeNoise ) + 1i * randn( sizeNoise ) );
+        recordedData(iSource,kSlow,:,:,:) = squeeze(cleanData(iSource,kSlow,:,:,:)) + dataNoise;
+        
+        dataSNR(iSource,kSlow) = snr( ToColumn( cleanData(iSource,kSlow,:,:,:) ), ToColumn( dataNoise ) );
+    end
+end
+
+%cleanData = mean( cleanData );
+fullDataDimensions = [totalSlowTimes totalFastTimes totalAntennasX totalAntennasY];
+recordedData = reshape( sum( recordedData, 1 ), fullDataDimensions );
+
+% FourierAcrossArray = @(data) fft( fft( data, [], 3 ), [], 4 );
+% 
+% recordedDataFFT = FourierAcrossArray( recordedData );
+
+%totalFastTimesFFT = 2^nextpow2( totalFastTimes );
+
+%ToFourier = @(data) fft( data, totalFastTimesFFT, 2 ); % 2 - fast time dimension
+%recordedDataFFT = ToFourier( recordedData ); 
+
+%% Forming single frequency data 
+
+fourierTransformSize = input.Results.FourierTransformLength;
+fastTimeDimension = 2;
+
+ReshapeStandard = @(x) reshape( x, [totalSlowTimes totalAntennasX totalAntennasY] );
+
+%recordedData = recordedData ./ norm( ToColumn( recordedData ) );
+
+[recordedDataFourierOld, dataFreqs] = CenteredFastFourierTransform( ...
+    recordedData, ...
+    'Dimension', fastTimeDimension, ...
+    'SamplingFrequency', input.Results.FastTimeSamplingFrequency, ...
+    'WindowFunction', input.Results.FourierWindowFunction, ...
+    'NumberPoints', fourierTransformSize  );
+
+[~,indexFreq] = min( abs(dataFreqs - input.Results.SourceFrequency) );
+singleFreq = dataFreqs(indexFreq);
+recordedDataSingleFreq = ReshapeStandard( recordedDataFourierOld(:,indexFreq,:,:) );
+
+
+% recordedDataSingleFreq = ReshapeStandard( FourierIntegral( ...
+%     fastTime, recordedData, ...
+%     input.Results.SourceFrequency, ...
+%     'Dimension', fastTimeDimension, ...
+%     'WindowFunction', @GaussianTaper, ...
+%     'FourierParameters', [0, -2*pi] ...
+%     ) );
+
+% -------
+sizeWindow = size( recordedData );
+sizeWindow(fastTimeDimension) = 1;
+
+window = repmat( shiftdim( ToColumn( GaussianTaper(totalFastTimes) ), fastTimeDimension-1 ), sizeWindow );
+assert( IsEqualSize( recordedData, window ) ); % sanity check
+
+recordedDataWindowed = recordedData .* window;
+
+sizeNorm = ones( 1, ndims(recordedData) );
+sizeNorm(fastTimeDimension) = totalFastTimes;
+norms = repmat( trapz( fastTime, conj(recordedDataWindowed).*recordedDataWindowed, fastTimeDimension ), sizeNorm );
+
+assert( IsEqualSize( recordedData, norms ) ); % sanity check
+
+recordedDataSingleFreq1 = ReshapeStandard( ...
+    FourierIntegral( fastTime, recordedData./(1+0*norms), ...
+    input.Results.SourceFrequency, ...
+    'Dimension', fastTimeDimension, ...
+    'WindowFunction', @GaussianTaper, ...
+    'FourierParameters', [0, -2*pi] ...
+    ) ...
+    );
+
+%recordedDataSingleFreq1 = flip(recordedDataSingleFreq1,3);
+% -------
+
+% recordedDataSingleFreq = flip( recordedDataSingleFreq, 3 );
+
+%recordedDataSingleFreq = recordedDataSingleFreq...
+%    / norm( squeeze( recordedDataSingleFreq ) );
+
+%% Get source location
+
+receiverPositionSlowTime = permute( receiverAssumedPosition, [3 1 2 4 5] );
+receiverPositionSlowTime = reshape( receiverPositionSlowTime(:,:,1,:,:), ...
+    [3 totalSlowTimes totalAntennasX totalAntennasY] );
+
+%quadrature = 1i*singleFreq/c/2 * ReshapeStandard( sum( (receiverPositionSlowTime - repmat( arrayPosition(:,:,1), [1 1 totalAntennasX totalAntennasY] ) ) .^ 2 ) );
+
+% Template = @(u,R) ...
+%     exp( 1i*singleFreq/c * R ) .* ...
+%     exp( -1i*singleFreq/c * ReshapeStandard( sum( receiverPositionSlowTime .* repmat( NormalizeVector(u), [1 totalSlowTimes totalAntennasX totalAntennasY ] ) ) ) ) .* ...
+%     exp( quadrature / R );
+
+Ranges = @(y) ReshapeStandard( sqrt( sum( ( receiverPositionSlowTime - repmat( ToColumn(y), [1 totalSlowTimes totalAntennasX totalAntennasY] ) ) .^ 2 ) ) );
+
+%UnnormalizedTemplate = @(y)  exp( -2*pi*1i*singleFreq/c * Ranges(y) ) ./ Ranges(y);
+UnnormalizedTemplate = @(y)  exp( -2*pi*1i*input.Results.SourceFrequency/c * Ranges(y) ) ./ (4*pi*Ranges(y));
+%Template = @(y) exp( 2*pi*1i* input.Results.SourceFrequency/c * Ranges(y) ) ./ Ranges(y);
+
+
+% TemplateMatchTest = @(uR) abs( dot( conj( ToColumn(recordedDataSingleFreq) ), ToColumn(Template( uR(1:3), uR(4) ) ) ) );
+
+gaussianTaper2D = ToColumn( GaussianTaper( totalAntennasX ) ) * ToRow( GaussianTaper( totalAntennasY ) );
+
+TemplateMatchTest = @(y) abs( CompensatedDot( NormalizeVector( ToColumn(recordedDataSingleFreq1) ) , ...
+    NormalizeVector( ToColumn( UnnormalizedTemplate( y ) ) ) ) ) .^2;
+TemplateMatchTest2 = @(y) abs( CompensatedDot( ...
+    NormalizeVector( ToColumn( gaussianTaper2D .* squeeze( recordedDataSingleFreq1 ) ) ) , ...
+    NormalizeVector( ToColumn( gaussianTaper2D .* squeeze( UnnormalizedTemplate( y ) ) ) ) ...
+    ) ) .^ 2;
+TemplateMatchTest3 = @(y) abs( dot( NormalizeVector( ToColumn(recordedDataSingleFreq1))*sqrt(totalAntennasX*totalAntennasY ) ,...
+    NormalizeVector( ToColumn( UnnormalizedTemplate( y ) ))*sqrt(totalAntennasX*totalAntennasY ) ) ) .^ 2 / totalAntennasX / totalAntennasY / totalAntennasX / totalAntennasY;
+%TemplateMatchTest = @(y) abs( dot( NormalizeVector( ToColumn(recordedDataSingleFreq) ) , ( ToColumn( UnnormalizedTemplate( y ) ) ) ) ) .^ 2;
+
+%TemplateMatchTest = @(y) abs( dot( conj( ToColumn(recordedDataSingleFreq) ) , ToColumn( Template( y ) ) ) ) .^ 2;
+
+% 
+% optimizationOptions = optimoptions( ...
+%     'fminunc', ...
+%     'MaxFunEvals', 1e4, ...
+%     'MaxIter', 1e4, ...
+%     'TolFun', 1e-50, ...
+%     'TolCon', 1e-50, ...
+%     'TolX', 1e-50...
+%     );
+
+optimizationOptions = optimoptions( ...
+    'fminunc', ...
+    'MaxFunctionEvaluations', 1e4, ...
+    'MaxIterations', 1e4, ...
+    'OptimalityTolerance', 1e-50, ...
+    'StepTolerance', 1e-50 );
+    
+
+CostFunction = @(y) 1 -TemplateMatchTest( y );
+%CostFunction2 = @(y) CompensatedSum( [1, -TemplateMatchTest2( [y;0] ) ] );
+%CostFunction3 = @(y) CompensatedSum( [1, -TemplateMatchTest3( [y;0] )] );
+
+% offset = thisSourcePosition - thisReceiverPosition;
+% uRGuess = [ NormalizeVector( offset ) ; norm( offset ) ];
+
+% deltaBounds = [ 0.01 ; 0.01 ; 0.1 ; 100 ];
+% lowerBounds = uRGuess - deltaBounds;
+% upperBounds = uRGuess + deltaBounds;
+
+deltaBounds = [ 500 ; 500; 500  ];
+lowerBounds = thisSourcePosition - deltaBounds;
+upperBounds = thisSourcePosition + deltaBounds;
+
+yGuess = [ 1 ; 1 ; 1  ];
+
+templateMatchingProblem = createOptimProblem( ...
+    'fminunc', ...
+    'objective', CostFunction, ...
+    'x0', yGuess, ...
+    'lb', lowerBounds, ...
+    'ub', upperBounds, ...
+    'options', optimizationOptions );
+
+% globalSearch = GlobalSearch( ...
+%     'FunctionTolerance', 1e-10, ...
+%     'XTolerance', 1e-10 );
+%yEstimatedInitial = fminunc( templateMatchingProblem );
+
+yEstimatedInitial = fminsearch( CostFunction, yGuess );
+
+% templateMatchingProblem.objective = CostFunction2;
+% templateMatchingProblem.x0 = yEstimated;
+% 
+% 
+% [yEstimated2, costMin] = fminunc( templateMatchingProblem );
+% yfEstimated = [yEstimated2 ; input.Results.SourceFrequency];
+
+%[yEstimated, costMin] = run( globalSearch, templateMatchingProblem );
+
+% Additional tuning using a variable assumed source frequency
+
+% commented out extension OVP
+UnnormalizedExtendedTemplate = @(y,f)  exp( -2*pi*1i*f/c * Ranges(y) ) ./ (4*pi*Ranges(y));
+%ExtendedTemplateMatchTest = @(y,f) abs( dot( ToColumn(recordedDataSingleFreq) , NormalizeVector( ToColumn( UnnormalizedExtendedTemplate( y, f ) ) ) ) );
+% ExtendedTemplateMatchTest = @(y,f) -norm( abs( NormalizeVector( ToColumn(recordedDataSingleFreq) ) ) - abs( NormalizeVector( ToColumn( UnnormalizedExtendedTemplate( y, f ) ) ) ) ) ;
+% ExtendedTemplateMatchTest = @(y,f) ...
+%     -sqrt( sum( abs( NormalizeVector( ToColumn(recordedDataSingleFreq1) ) ...
+%     - NormalizeVector( ToColumn( UnnormalizedExtendedTemplate( y, f ) ) ) ).^2 ) );
+
+L2MatrixNorm = @(mat) norm( ToColumn(mat), 2 );
+
+%ExtendedTemplateMatchTest = @(y,f) -L2MatrixNorm( ...
+%    NormalizeVector( squeeze( recordedDataSingleFreq1 ) ) ...
+%    - NormalizeVector( squeeze( UnnormalizedExtendedTemplate(y, f ) ) ) );
+
+% ExtendedTemplateMatchTest = @(y,f) -L2MatrixNorm( ...
+%     NormalizeVector( squeeze( recordedDataSingleFreq1 ) ) - ...
+%     NormalizeVector( squeeze( UnnormalizedExtendedTemplate( y, f ) ) ) *...
+%     exp(1i*mean( ToColumn(angle( NormalizeVector( squeeze( recordedDataSingleFreq1 ) ) ./...
+%     NormalizeVector( squeeze( UnnormalizedExtendedTemplate( [0;0;0], 3e8 ) ) ) ) ) )) );
+
+LeastSquaresMatchTest = @(y,f) -L2MatrixNorm( ...
+    NormalizeVector( squeeze( recordedDataSingleFreq1 ) ) - ...
+    NormalizeVector( squeeze( UnnormalizedExtendedTemplate( y, f ) ) ) *...
+    exp(1i*mean( ToColumn(angle( NormalizeVector( squeeze( recordedDataSingleFreq1 ) ) ./...
+    NormalizeVector( squeeze( UnnormalizedExtendedTemplate( y, f ) ) ) ) ) )) );
+
+%ExtendedTemplateMatchTest = @(y,f) abs( dot( NormalizeVector( ToColumn(recordedDataSingleFreq) ) , ( ToColumn( UnnormalizedExtendedTemplate( y,f ) ) ) ) ) .^ 2;
+RefinementCostFunction = @(y) -LeastSquaresMatchTest( y, input.Results.SourceFrequency );
+
+%ExtendedCostFunction = @(y2dfphi)  -ExtendedTemplateMatchTest( [y2dfphi(1:2) ; 0] , y2dfphi(3), y2dfphi(4) );
+extendedDeltaBounds = [ 1 ; 1 ; 1];
+extendedGuess = yEstimatedInitial;
+lowerBounds = extendedGuess - extendedDeltaBounds;
+upperBounds = extendedGuess + extendedDeltaBounds;
+
+constrainedOptimizationOptions = optimoptions( ...
+    'fmincon', ...
+    'Algorithm', 'active-set', ...
+    'FiniteDifferenceType', 'central', ...
+    'MaxFunEvals', 1e7, ...
+    'MaxIter', 1e7, ...
+    'StepTolerance', 1e-16, ...
+    'FunctionTolerance', 1e-16 ...
+    );
+constrainedTemplateMatchingProblem = createOptimProblem( ...
+    'fmincon', ...
+    'objective', @(y) log(RefinementCostFunction(y)), ...
+    'x0', extendedGuess, ...
+    'lb', lowerBounds, ...
+    'ub', upperBounds, ...
+    'options', constrainedOptimizationOptions );
+
+
+yEstimatedConstrained = fmincon( constrainedTemplateMatchingProblem );
+
+% constrainedTemplateMatchingProblem.x0 = yEstimatedConstrained;
+% [yfEstimated,costMinExtended] = fmincon( constrainedTemplateMatchingProblem );
+
+optimizationOptions = optimset( ...
+    'MaxFunEvals', 1e4, ...
+    'MaxIter', 1e4, ...
+    'TolFun', 1e-50, ...
+    'TolCon', 1e-50, ...
+    'TolX', 1e-50...
+    );
+
+yEstimatedRefined = fminsearch( ...
+    @(y) log(RefinementCostFunction(y)), ...
+    yEstimatedConstrained,...
+    optimizationOptions );
+
+
+% unconstrainedOptimizationOptions = optimoptions( ...
+%     'fminunc', ...
+%     'Algorithm', 'quasi-newton', ...
+%     'HessUpdate', 'bfgs', ...
+%     'FiniteDifferenceType', 'central', ...
+%     'FiniteDifferenceStepSize', 1e-7, ...
+%     'MaxFunEvals', 1e6, ...
+%     'MaxIter', 1e6, ...
+%     'StepTolerance', 1e-20, ...
+%     'FunctionTolerance', 1e-20 ...
+%     );
+
+% unconstrainedTemplateMatchingProblem = createOptimProblem( ...
+%     'fminunc', ...
+%     'objective', @(y) log(ExtendedCostFunction(y)), ...
+%     'x0', yEstimatedRefined ...
+%     ... %'nonlcon', @(x) deal( costMin-CostFunction(x(1:2)), [] ), ...
+%     ... %'options', optimizationOptions 
+%     );
+% 
+% constrainedTemplateMatchingProblem.x0 = yEstimatedRefined;
+% 
+% yEstimatedRefined = run( GlobalSearch, constrainedTemplateMatchingProblem );
+
+%yfEstimated = fminunc( ExtendedCostFunction, extendedGuess );
+
+% uREstimated = fminunc( CostFunction, [0 ; 0 ; 1 ; 2990], optimOptions );
+
+%%
+
+output = struct( ...
+    'sourceLocationCoarse', yEstimatedInitial, ...
+    'sourceLocation', yEstimatedRefined, ...
+    'sourceFrequency', input.Results.SourceFrequency, ...
+    'dataSNR', dataSNR ...
+    );
+
+end
+
+function sourceParameterOut = PadSourceParameters( sourceParameterIn, totalSources )
+if isscalar( sourceParameterIn )
+    sourceParameterOut = sourceParameterIn .* ones( totalSources, 1 );
+else
+    sourceParameterOut = sourceParameterIn;
+end
+end
